@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import sys
+import json
 
 from automation_server_client import AutomationServer, Workqueue, WorkItemError, Credential
 from kmd_nexus_client import (
@@ -41,23 +42,78 @@ async def populate_queue(workqueue: Workqueue):
 
 
 async def process_workqueue(workqueue: Workqueue):
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger(__name__)    
+    postnummer_kommunekode_mapping = None
+    postnummer_kommunekode_mapping_filsti = "postnumre_med_kommunekode.json"
 
-    logger.info("Hello from process workqueue!")
+    leverandører = organizations_client.get_suppliers()
+    
+    with open(postnummer_kommunekode_mapping_filsti, "r", encoding="utf-8") as file:
+        postnummer_kommunekode_mapping = json.load(file)
 
     for item in workqueue:
         with item:
-            data = item.get_data_as_dict()
+            data = item.get_data_as_dict()            
 
             try:
-                # Process the item here
+                kommunekode = kontroller_kommunekode(item, data, postnummer_kommunekode_mapping)
+                
+                if kommunekode is None:
+                    continue
+
+                leverandør = kontroller_leverandør(data, leverandører)
+
+                if leverandør is None:                    
+                    continue
+                
+                leverandør["address"]["administrativeAreaCode"] = kommunekode
+                
+                organizations_client.update_supplier(leverandør)
+                tracker.track_task(process_name)
+                
                 pass
             except WorkItemError as e:
                 # A WorkItemError represents a soft error that indicates the item should be passed to manual processing or a business logic fault
                 logger.error(f"Error processing item: {data}. Error: {e}")
                 item.fail(str(e))
 
+def kontroller_kommunekode(item: any, data: dict, mapping: list) -> str | None:
+    if(data["postnummer"] is None):        
+        reporter.report(
+            process_name,
+            "Manglende postnummer",
+            {"Leverandør": item.reference},
+        )
+        return None
 
+    kommunekode = next((list_item for list_item in mapping if str(list_item["Postnr"]) == data["postnummer"]), None)["Kommunenr"]
+
+    if kommunekode is None:
+        reporter.report(            
+            process_name,
+            "Postnummer uden kommunekode",
+            {"Leverandør": item.reference, "Postnummer": data["postnummer"]},
+        )
+        return None
+    
+    return str(kommunekode)
+
+def kontroller_leverandør(data: dict, leverandører: list) -> dict | None:    
+    leverandør = next(
+        (
+            rel
+            for rel in leverandører
+            if rel["id"] == data["leverandør_id"]
+        ),
+        None,
+    )
+    
+    if leverandør is None:
+        return None
+
+    leverandør = citizens_client.resolve_reference(leverandør)
+    return leverandør
+    
 if __name__ == "__main__":
     ats = AutomationServer.from_environment()
     workqueue = ats.workqueue()
