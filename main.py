@@ -66,7 +66,8 @@ async def process_workqueue(workqueue: Workqueue):
                 if leverandør is None:                    
                     continue
                 
-                leverandør["address"]["administrativeAreaCode"] = kommunekode
+                if leverandør["address"]["administrativeAreaCode"] != kommunekode:
+                    leverandør["address"]["administrativeAreaCode"] = kommunekode
                 
                 organizations_client.update_supplier(leverandør)
                 tracker.track_task(process_name)
