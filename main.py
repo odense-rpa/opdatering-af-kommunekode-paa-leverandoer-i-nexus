@@ -68,9 +68,8 @@ async def process_workqueue(workqueue: Workqueue):
                 
                 if leverandør["address"]["administrativeAreaCode"] != kommunekode:
                     leverandør["address"]["administrativeAreaCode"] = kommunekode
-                
-                organizations_client.update_supplier(leverandør)
-                tracker.track_task(process_name)
+                    organizations_client.update_supplier(leverandør)
+                    tracker.track_task(process_name)
                 
                 pass
             except WorkItemError as e:
