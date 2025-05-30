@@ -86,7 +86,7 @@ def kontroller_kommunekode(item: any, data: dict, mapping: list) -> str | None:
         )
         return None
 
-    kommunekode = next((list_item for list_item in mapping if str(list_item["Postnr"]) == data["postnummer"]), None)["Kommunenr"]
+    kommunekode = next((list_item for list_item in mapping if str(list_item["Postnr"]) == data["postnummer"]), None)
 
     if kommunekode is None:
         reporter.report(            
@@ -96,7 +96,7 @@ def kontroller_kommunekode(item: any, data: dict, mapping: list) -> str | None:
         )
         return None
     
-    return str(kommunekode)
+    return str(kommunekode["Kommunenr"])
 
 def kontroller_leverandør(data: dict, leverandører: list) -> dict | None:    
     leverandør = next(
