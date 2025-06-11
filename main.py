@@ -53,7 +53,7 @@ async def process_workqueue(workqueue: Workqueue):
 
     for item in workqueue:
         with item:
-            data = item.get_data_as_dict()            
+            data = item.data            
 
             try:
                 kommunekode = kontroller_kommunekode(item, data, postnummer_kommunekode_mapping)
@@ -127,6 +127,7 @@ if __name__ == "__main__":
         client_secret=credential.password,
         instance=credential.get_data_as_dict()["instance"],
     )
+
     citizens_client = CitizensClient(nexus_client=nexus_client)
     organizations_client = OrganizationsClient(nexus_client=nexus_client)    
 
