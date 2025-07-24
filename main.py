@@ -5,16 +5,12 @@ import json
 
 from automation_server_client import AutomationServer, Workqueue, WorkItemError, Credential
 from kmd_nexus_client import (
-    NexusClient,
-    CitizensClient,
-    OrganizationsClient   
+    NexusClientManager,
 )
 from odk_tools.tracking import Tracker
 from odk_tools.reporting import Reporter
 
-nexus_client: NexusClient = None
-citizens_client: CitizensClient = None
-organizations_client: OrganizationsClient = None
+nexus_client_manager: NexusClientManager = None
 tracker: Tracker = None
 reporter: Reporter = None
 logger = None
@@ -22,12 +18,12 @@ process_name = "Opdatering af kommunekode på leverandør i Nexus"
 
 async def populate_queue(workqueue: Workqueue):
     logger = logging.getLogger(__name__)
-    leverandører = organizations_client.get_suppliers()    
+    leverandører = nexus_client_manager.organisationer.hent_leverandører()    
     aktive_leverandører = [item for item in leverandører if item.get("active") is True]
     
     for leverandør in aktive_leverandører:
         try:
-            leverandør_objekt = citizens_client.resolve_reference(leverandør)
+            leverandør_objekt = nexus_client_manager.hent_fra_reference(leverandør)
             
             kø_data = {
                 "leverandør_id": leverandør_objekt["id"],
@@ -46,7 +42,7 @@ async def process_workqueue(workqueue: Workqueue):
     postnummer_kommunekode_mapping = None
     postnummer_kommunekode_mapping_filsti = "postnumre_med_kommunekode.json"
 
-    leverandører = organizations_client.get_suppliers()
+    leverandører = nexus_client_manager.organisationer.hent_leverandører()
     
     with open(postnummer_kommunekode_mapping_filsti, "r", encoding="utf-8") as file:
         postnummer_kommunekode_mapping = json.load(file)
@@ -68,7 +64,7 @@ async def process_workqueue(workqueue: Workqueue):
                 
                 if leverandør["address"]["administrativeAreaCode"] != kommunekode:
                     leverandør["address"]["administrativeAreaCode"] = kommunekode
-                    organizations_client.update_supplier(leverandør)
+                    nexus_client_manager.organisationer.opdater_leverandør(leverandør)
                     tracker.track_task(process_name)
                 
                 pass
@@ -111,7 +107,7 @@ def kontroller_leverandør(data: dict, leverandører: list) -> dict | None:
     if leverandør is None:
         return None
 
-    leverandør = citizens_client.resolve_reference(leverandør)
+    leverandør = nexus_client_manager.hent_fra_reference(leverandør)
     return leverandør
     
 if __name__ == "__main__":
@@ -122,14 +118,11 @@ if __name__ == "__main__":
     tracking_credential = Credential.get_credential("Odense SQL Server")
     reporting_credential = Credential.get_credential("RoboA")
 
-    nexus_client = NexusClient(
+    nexus_client_manager = NexusClientManager(
         client_id=credential.username,
         client_secret=credential.password,
         instance=credential.data["instance"],
     )
-
-    citizens_client = CitizensClient(nexus_client=nexus_client)
-    organizations_client = OrganizationsClient(nexus_client=nexus_client)    
 
     tracker = Tracker(
         username=tracking_credential.username, password=tracking_credential.password
