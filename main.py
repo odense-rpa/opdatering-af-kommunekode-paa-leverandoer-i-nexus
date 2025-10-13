@@ -3,7 +3,13 @@ import logging
 import sys
 import json
 
-from automation_server_client import AutomationServer, Workqueue, WorkItemError, Credential, WorkItem
+from automation_server_client import (
+    AutomationServer,
+    Workqueue,
+    WorkItemError,
+    Credential,
+    WorkItem,
+)
 from kmd_nexus_client import (
     NexusClientManager,
 )
@@ -15,104 +21,132 @@ tracker: Tracker
 reporter: Reporter
 
 proces_navn = "Opdatering af kommunekode på leverandør i Nexus"
-logger = logging.getLogger(proces_navn)
 
-async def populate_queue(workqueue: Workqueue):    
-    leverandører = nexus.organisationer.hent_leverandører()    
+
+async def populate_queue(workqueue: Workqueue):
+    logger = logging.getLogger(proces_navn)
+    leverandører = nexus.organisationer.hent_leverandører()
     aktive_leverandører = [item for item in leverandører if item.get("active") is True]
-    
+
     for leverandør in aktive_leverandører:
         try:
             leverandør_objekt = nexus.hent_fra_reference(leverandør)
-            
+
             kø_data = {
                 "leverandør_id": leverandør_objekt["id"],
                 "kommunekode": leverandør_objekt["address"]["administrativeAreaCode"],
-                "postnummer": leverandør_objekt["address"]["postalCode"]
+                "postnummer": leverandør_objekt["address"]["postalCode"],
             }
 
-            workqueue.add_item(kø_data, f"{leverandør.get('id')} - {leverandør.get('name')}")
+            workqueue.add_item(
+                kø_data, f"{leverandør.get('id')} - {leverandør.get('name')}"
+            )
         except Exception as e:
             logger.error(f"Failed to add item to workqueue: {kø_data}. Error: {e}")
-            raise WorkItemError(f"Failed to add item to workqueue: {kø_data}. Error: {e}")
+            raise WorkItemError(
+                f"Failed to add item to workqueue: {kø_data}. Error: {e}"
+            )
 
 
 async def process_workqueue(workqueue: Workqueue):
-    logger = logging.getLogger(__name__)    
+    logger = logging.getLogger(proces_navn)
     postnummer_kommunekode_mapping = None
     postnummer_kommunekode_mapping_filsti = "postnumre_med_kommunekode.json"
 
     leverandører = nexus.organisationer.hent_leverandører()
-    
+
     with open(postnummer_kommunekode_mapping_filsti, "r", encoding="utf-8") as file:
         postnummer_kommunekode_mapping = json.load(file)
 
     for item in workqueue:
         with item:
-            data = item.data            
+            data = item.data
 
             try:
-                kommunekode = kontroller_kommunekode(item, data, postnummer_kommunekode_mapping)
-                
+                kommunekode = kontroller_kommunekode(
+                    item, data, postnummer_kommunekode_mapping
+                )
+
                 if kommunekode is None:
                     continue
 
                 leverandør = kontroller_leverandør(data, leverandører)
 
-                if leverandør is None:                    
+                if leverandør is None:
                     continue
-                
+
                 if leverandør["address"]["administrativeAreaCode"] != kommunekode:
                     leverandør["address"]["administrativeAreaCode"] = kommunekode
                     nexus.organisationer.opdater_leverandør(leverandør)
                     tracker.track_task(proces_navn)
-                
+
             except WorkItemError as e:
                 # A WorkItemError represents a soft error that indicates the item should be passed to manual processing or a business logic fault
                 logger.error(f"Error processing item: {data}. Error: {e}")
                 item.fail(str(e))
 
+
 def kontroller_kommunekode(item: WorkItem, data: dict, mapping: list) -> str | None:
-    if(data["postnummer"] is None):        
-        reporter.report(
-            proces_navn,
-            "Manglende postnummer",
-            {"Leverandør": item.reference},
-        )
-        return None
+    logger = logging.getLogger(proces_navn)
+    if data["postnummer"] is None:
+        logger.info(f"Leverandør {item.reference} har ikke et postnummer angivet.")
+        try:
+            reporter.report(
+                proces_navn,
+                "Manglende postnummer",
+                {"Leverandør": item.reference},
+            )
+        except Exception as e:
+            logger.error(
+                f"Fejl ved rapportering for leverandør {item.reference} uden postnummer: {e}"
+            )
+        finally:
+            return None
 
-    kommunekode = next((list_item for list_item in mapping if str(list_item["Postnr"]) == data["postnummer"]), None)
-
-    if kommunekode is None:
-        reporter.report(            
-            proces_navn,
-            "Postnummer uden kommunekode",
-            {"Leverandør": item.reference, "Postnummer": data["postnummer"]},
-        )
-        return None
-    
-    return str(kommunekode["Kommunenr"])
-
-def kontroller_leverandør(data: dict, leverandører: list) -> dict | None:    
-    leverandør = next(
+    kommunekode = next(
         (
-            rel
-            for rel in leverandører
-            if rel["id"] == data["leverandør_id"]
+            list_item
+            for list_item in mapping
+            if str(list_item["Postnr"]) == data["postnummer"]
         ),
         None,
     )
-    
+
+    if kommunekode is None:
+        logger.info(
+            f"Leverandør {item.reference} har et postnummer uden tilknyttet kommunekode: {data['postnummer']}"
+        )
+        try:
+            reporter.report(
+                proces_navn,
+                "Postnummer uden kommunekode",
+                {"Leverandør": item.reference, "Postnummer": data["postnummer"]},
+            )
+        except Exception as e:
+            logger.error(
+                f"Fejl ved rapportering for leverandør {item.reference} med postnummer {data['postnummer']}: {e}"
+            )
+        finally:
+            return None
+
+    return str(kommunekode["Kommunenr"])
+
+
+def kontroller_leverandør(data: dict, leverandører: list) -> dict | None:
+    leverandør = next(
+        (rel for rel in leverandører if rel["id"] == data["leverandør_id"]),
+        None,
+    )
+
     if leverandør is None:
         return None
 
     leverandør = nexus.hent_fra_reference(leverandør)
     return leverandør
-    
+
+
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.INFO     
-    )
+    logging.basicConfig(level=logging.INFO)
 
     ats = AutomationServer.from_environment()
     workqueue = ats.workqueue()
