@@ -14,11 +14,10 @@ from kmd_nexus_client import (
     NexusClientManager,
 )
 from odk_tools.tracking import Tracker
-from odk_tools.reporting import Reporter
+from odk_tools.reporting import report
 
 nexus: NexusClientManager
 tracker: Tracker
-reporter: Reporter
 
 proces_navn = "Opdatering af kommunekode på leverandør i Nexus"
 
@@ -91,11 +90,13 @@ def kontroller_kommunekode(item: WorkItem, data: dict, mapping: list) -> str | N
     if data["postnummer"] is None:
         logger.info(f"Leverandør {item.reference} har ikke et postnummer angivet.")
         try:
-            reporter.report(
-                proces_navn,
-                "Manglende postnummer",
-                {"Leverandør": item.reference},
-            )
+            report(
+                report_id="opdatering_af_kommunekode_paa_leverandoer_i_nexus",
+                group="Manglende postnummer",
+                json={
+                    "Leverandør": item.reference                                            
+                }
+            )            
         except Exception as e:
             logger.error(
                 f"Fejl ved rapportering for leverandør {item.reference} uden postnummer: {e}"
@@ -117,10 +118,13 @@ def kontroller_kommunekode(item: WorkItem, data: dict, mapping: list) -> str | N
             f"Leverandør {item.reference} har et postnummer uden tilknyttet kommunekode: {data['postnummer']}"
         )
         try:
-            reporter.report(
-                proces_navn,
-                "Postnummer uden kommunekode",
-                {"Leverandør": item.reference, "Postnummer": data["postnummer"]},
+            report(
+                report_id="opdatering_af_kommunekode_paa_leverandoer_i_nexus",
+                group="Postnummer uden kommunekode",
+                json={
+                    "Leverandør": item.reference,
+                    "Postnummer": data["postnummer"],
+                }
             )
         except Exception as e:
             logger.error(
@@ -153,8 +157,7 @@ if __name__ == "__main__":
 
     credential = Credential.get_credential("KMD Nexus - produktion")
     tracking_credential = Credential.get_credential("Odense SQL Server")
-    reporting_credential = Credential.get_credential("RoboA")
-
+    
     nexus = NexusClientManager(
         client_id=credential.username,
         client_secret=credential.password,
@@ -163,10 +166,6 @@ if __name__ == "__main__":
 
     tracker = Tracker(
         username=tracking_credential.username, password=tracking_credential.password
-    )
-
-    reporter = Reporter(
-        username=reporting_credential.username, password=reporting_credential.password
     )
 
     # Queue management
