@@ -1,7 +1,9 @@
+import argparse
 import asyncio
 import logging
 import sys
 import json
+import os
 
 from automation_server_client import (
     AutomationServer,
@@ -15,6 +17,7 @@ from kmd_nexus_client import (
 )
 from odk_tools.tracking import Tracker
 from odk_tools.reporting import report
+from process.config import get_excel_mapping, load_excel_mapping
 
 nexus: NexusClientManager
 tracker: Tracker
@@ -24,11 +27,17 @@ proces_navn = "Opdatering af kommunekode på leverandør i Nexus"
 
 async def populate_queue(workqueue: Workqueue):
     logger = logging.getLogger(proces_navn)
+    regler = get_excel_mapping()
     leverandører = nexus.organisationer.hent_leverandører()
+    irrelevante_leverandører = regler.get("Irrelevante leverandører", [])
+    
     aktive_leverandører = [item for item in leverandører if item.get("active") is True]
 
     for leverandør in aktive_leverandører:
         try:
+            if leverandør.get("name") in irrelevante_leverandører:                
+                continue
+
             leverandør_objekt = nexus.hent_fra_reference(leverandør)
 
             kø_data = {
@@ -167,6 +176,27 @@ if __name__ == "__main__":
     tracker = Tracker(
         username=tracking_credential.username, password=tracking_credential.password
     )
+
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description=proces_navn)
+    parser.add_argument(
+        "--excel-file",
+        default="./Regelsæt.xlsx",
+        help="Path to the Excel file containing mapping data (default: ./Regelsæt.xlsx)",
+    )
+    parser.add_argument(
+        "--queue",
+        action="store_true",
+        help="Populate the queue with test data and exit",
+    )
+    args = parser.parse_args()
+
+    # Validate Excel file exists
+    if not os.path.isfile(args.excel_file):
+        raise FileNotFoundError(f"Excel file not found: {args.excel_file}")
+
+    # Load excel mapping data once on startup
+    load_excel_mapping(args.excel_file)
 
     # Queue management
     if "--queue" in sys.argv:
